@@ -1,0 +1,38 @@
+# Ignore virtual environments
+venv/
+env/
+
+# Ignore environment variable file
+.env
+
+# Ignore OS-generated files
+.DS_Store
+Thumbs.db
+
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore VS Code settings
+.vscode/
+
+# Ignore uploads and temp files (if generated during runtime)
+uploads/
+temp/
+
+# Ignore logs and compiled files
+*.log
+*.sqlite3
+*.db
+*.mp4
+*.mp3
+*.wav
+*.json
+*.zip
+*.egg-info/
+
+# Ignore ffmpeg binaries if copied locally (optional)
+ffmpeg/
