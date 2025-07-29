@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from src.utils import extract_audio_from_video, transcribe_audio, create_summary, create_quiz
-from yt_download import download_youtube_video  # ✅ your custom YouTube downloader
+from yt_download import download_youtube_video
 
 # App title
 st.title("🎥 Video Summarizer and Quiz App")
@@ -16,7 +16,7 @@ temp_dir = "temp"
 os.makedirs(temp_dir, exist_ok=True)
 
 # -------------------------
-# 📁 Option 1: Upload Video
+# 📁 Upload Video
 # -------------------------
 st.subheader("📤 Upload a Video File")
 video_file = st.file_uploader("Upload a video", type=["mp4", "mov", "avi"])
@@ -29,61 +29,77 @@ if video_file:
     st.video(video_path)
 
 # -------------------------------
-# 🌐 Option 2: YouTube URL Input
+# 🌐 YouTube URL Download
 # -------------------------------
 st.subheader("🌐 Or Paste a YouTube Video URL")
 youtube_url = st.text_input("Enter YouTube video URL")
 
 if st.button("Download from YouTube"):
     if youtube_url.strip():
-        with st.spinner("Downloading..."):
+        with st.spinner("📥 Downloading..."):
             try:
                 downloaded_path = download_youtube_video(youtube_url.strip(), output_dir=temp_dir)
-                st.session_state.video = downloaded_path
-                st.video(downloaded_path)
-                st.success("Downloaded successfully!")
+                if downloaded_path:
+                    st.session_state.video = downloaded_path
+                    st.video(downloaded_path)
+                    st.success("✅ Downloaded successfully!")
+                else:
+                    st.error("❌ Failed to download the video.")
             except Exception as e:
-                st.error(f"Download failed: {e}")
+                st.error(f"❌ Download failed: {e}")
     else:
-        st.warning("Please enter a valid YouTube URL.")
+        st.warning("⚠️ Please enter a valid YouTube URL.")
 
 # -----------------------------
 # 🧠 Generate Transcript
 # -----------------------------
 if st.session_state.video and st.session_state.transcript is None:
-    with st.spinner("Transcribing..."):
-        audio_path = os.path.join(temp_dir, "audio.mp3")
-        extract_audio_from_video(st.session_state.video, audio_path)
-        transcript = transcribe_audio(audio_path)
-        st.session_state.transcript = transcript
-    st.success("Transcript ready!")
+    st.subheader("🎙️ Transcribing Audio...")
+    with st.spinner("🔊 Extracting audio and calling Whisper..."):
+        try:
+            audio_path = os.path.join(temp_dir, "audio.mp3")
+            extract_audio_from_video(st.session_state.video, audio_path)
+            st.success("🎧 Audio extracted.")
+
+            transcript = transcribe_audio(audio_path)
+            if transcript.strip():
+                st.session_state.transcript = transcript
+                st.success("📝 Transcript ready!")
+                st.subheader("🧾 Transcript Preview")
+                st.code(transcript[:1000])  # Show first 1000 characters
+            else:
+                st.error("❌ No transcript returned from Whisper.")
+        except Exception as e:
+            st.error(f"❌ Transcription failed: {e}")
 
 # -------------------------
 # 📝 Generate Summary
 # -------------------------
 if st.button("Summarize"):
     if st.session_state.transcript:
-        st.session_state.summary = create_summary(st.session_state.transcript)
-        st.subheader("Summary")
+        with st.spinner("🧠 Summarizing..."):
+            st.session_state.summary = create_summary(st.session_state.transcript)
+        st.subheader("📄 Summary")
         st.write(st.session_state.summary)
     else:
-        st.warning("Transcript not available yet.")
+        st.warning("⚠️ Transcript not available yet.")
 
 # -------------------------
 # ❓ Generate Quiz
 # -------------------------
 if st.button("Quiz Yourself"):
     if not st.session_state.transcript:
-        st.warning("Transcript not available.")
+        st.warning("⚠️ Transcript not available.")
     else:
         if st.session_state.summary is None:
             st.session_state.summary = create_summary(st.session_state.transcript)
         try:
-            quizzes = create_quiz(st.session_state.summary)
-            st.session_state.quizzes = quizzes
-            st.session_state.quiz_yourself = True
+            with st.spinner("🧠 Generating quiz..."):
+                quizzes = create_quiz(st.session_state.summary)
+                st.session_state.quizzes = quizzes
+                st.session_state.quiz_yourself = True
         except Exception as e:
-            st.error(f"Error creating quiz: {e}")
+            st.error(f"❌ Error creating quiz: {e}")
 
 # -------------------------
 # ✅ Display Quiz
@@ -91,7 +107,7 @@ if st.button("Quiz Yourself"):
 def display_quiz():
     quiz_data = st.session_state.get("quizzes", [])
     if not quiz_data:
-        st.error("No quiz data available.")
+        st.error("❌ No quiz data available.")
         return
 
     if 'user_answers' not in st.session_state or len(st.session_state.user_answers) != len(quiz_data):
