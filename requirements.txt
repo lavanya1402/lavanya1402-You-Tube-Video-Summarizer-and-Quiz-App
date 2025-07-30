@@ -5,5 +5,7 @@ pydub
 langchain
 langchain-openai
 python-dotenv
+imageio-ffmpeg
+moviepy
 pydantic
 langchain-community
