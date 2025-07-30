@@ -1,98 +1,105 @@
+# src/utils.py
+
 import os
-from pydub import AudioSegment
+import wave
+import yt_dlp
 from moviepy.editor import VideoFileClip
-from langchain_core.prompts import PromptTemplate
-from langchain_openai import ChatOpenAI
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.pydantic_v1 import BaseModel, Field  # ✅ Corrected: use langchain_core.pydantic_v1
-from openai import OpenAI
+from dotenv import load_dotenv
+import openai
 
-# ✅ Initialize OpenAI client for Whisper
-client = OpenAI()
+load_dotenv()
 
-# ✅ Initialize LangChain LLM (GPT-4o)
-llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
-
-
-# ---------------------------
-# 🎵 Extract Audio from Video
-# ---------------------------
+# ----------------------
+# 🎵 Extract Audio
+# ----------------------
 def extract_audio_from_video(video_path, audio_path):
-    video = VideoFileClip(video_path)
-    audio = video.audio
-    audio.write_audiofile(audio_path, verbose=False, logger=None)
-    audio.close()
+    try:
+        clip = VideoFileClip(video_path)
+        clip.audio.write_audiofile(audio_path, codec='mp3')
+        clip.close()
+    except Exception as e:
+        raise RuntimeError(f"Audio extraction failed: {e}")
 
+# ----------------------
+# 📝 Transcribe Audio
+# ----------------------
+def transcribe_audio(audio_path):
+    client = openai.OpenAI()
 
-# ------------------------------
-# 🔊 Transcribe using Whisper API
-# ------------------------------
-def transcribe_audio_chunk(chunk_path):
-    with open(chunk_path, "rb") as audio_file:
+    with open(audio_path, "rb") as f:
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
-            file=audio_file
+            file=f,
+            response_format="text"
         )
-    return transcript.text
+    return transcript
 
+# ----------------------
+# 🧠 Summarize Transcript
+# ----------------------
+def create_summary(transcript_text):
+    client = openai.OpenAI()
 
-def transcribe_audio(audio_path):
-    max_size = 24 * 1024 * 1024  # 24MB Whisper upload limit
-    chunk_duration = 10 * 60 * 1000  # 10 minutes in ms
-    audio = AudioSegment.from_file(audio_path)
-    duration_ms = len(audio)
-
-    if os.path.getsize(audio_path) > max_size:
-        transcript = ""
-        for i in range(0, duration_ms, chunk_duration):
-            chunk = audio[i:i + chunk_duration]
-            chunk_path = f"{audio_path[:-4]}_chunk{i//1000}.mp3"
-            chunk.export(chunk_path, format="mp3")
-            transcript += transcribe_audio_chunk(chunk_path) + " "
-            os.remove(chunk_path)
-        return transcript.strip()
-    else:
-        return transcribe_audio_chunk(audio_path)
-
-
-# -----------------------------
-# 🧠 Quiz Schema + JSON Parser
-# -----------------------------
-class QuizQuestion(BaseModel):
-    question: str = Field(description="The quiz question.")
-    options: dict = Field(description="Answer options.")
-    correct_answer: str = Field(description="Correct answer key.")
-    explanation: str = Field(description="Explanation.")
-
-parser = JsonOutputParser(pydantic_object=QuizQuestion)
-
-
-# -----------------------------
-# 📝 Summary Generator
-# -----------------------------
-def create_summary(transcript):
-    template = """
-    You are a helpful assistant. Summarize the content and extract key ideas.
-
-    Transcript:
-    {transcript}
-    """
-    prompt = PromptTemplate(template=template, input_variables=["transcript"])
-    chain = prompt | llm
-    return chain.invoke({"transcript": transcript}).content
-
-
-# -----------------------------
-# ❓ Quiz Generator
-# -----------------------------
-def create_quiz(summary):
-    prompt = PromptTemplate(
-        template=(
-            "You are a quiz generator. Based on:\n{summary}\n"
-            "Generate 10 multiple choice questions in JSON format:\n{format_instructions}"
-        ),
-        input_variables=["summary"],
-        partial_variables={"format_instructions": parser.get_format_instructions()},
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "Summarize the following transcript clearly and concisely."},
+            {"role": "user", "content": transcript_text}
+        ]
     )
-    chain = prompt | llm | parser
-    return chain.invoke({"summary": summary})
+    return response.choices[0].message.content.strip()
+
+# ----------------------
+# ❓ Create Quiz
+# ----------------------
+def create_quiz(summary_text):
+    client = openai.OpenAI()
+
+    prompt = f"""
+    Create 5 multiple-choice questions from the following summary. 
+    For each question, provide 4 options (labeled A, B, C, D), indicate the correct one, and give a short explanation.
+
+    Summary:
+    {summary_text}
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a helpful quiz generator."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    raw_text = response.choices[0].message.content.strip()
+
+    # Parse quiz using simple logic (assumes strict format)
+    return parse_quiz(raw_text)
+
+# ----------------------
+# 🧠 Parse Quiz
+# ----------------------
+def parse_quiz(text):
+    import re
+    quizzes = []
+    questions = text.split("\n\n")
+    for q in questions:
+        lines = q.strip().split("\n")
+        if len(lines) < 6:
+            continue
+        question = lines[0].strip()
+        options = {
+            "A": lines[1].split("A.")[1].strip() if "A." in lines[1] else lines[1].strip(),
+            "B": lines[2].split("B.")[1].strip() if "B." in lines[2] else lines[2].strip(),
+            "C": lines[3].split("C.")[1].strip() if "C." in lines[3] else lines[3].strip(),
+            "D": lines[4].split("D.")[1].strip() if "D." in lines[4] else lines[4].strip(),
+        }
+        correct = re.search(r"Correct Answer: ([ABCD])", q)
+        explanation = re.search(r"Explanation: (.+)", q)
+        quizzes.append({
+            "question": question,
+            "options": options,
+            "correct_answer": correct.group(1) if correct else "A",
+            "explanation": explanation.group(1) if explanation else ""
+        })
+    return quizzes
